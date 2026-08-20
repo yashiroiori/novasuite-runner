@@ -2,6 +2,13 @@
 
 Todas las versiones notables de NovaSuite Runner.
 
+## [0.11.4] — 2026-08-20
+
+### Cambiado
+- Publisher `yashiroiori` y enlaces al repositorio publico
+  `yashiroiori/novasuite-runner`.
+- Licencia MIT, changelog y datos genericos en los ejemplos del README.
+
 ## [0.11.0] — 2026-08-20
 
 ### Agregado
