@@ -1,0 +1,438 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── barra superior ── */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto;
+}
+.brand { font-weight: 600; letter-spacing: .3px; }
+.summary { color: var(--vscode-descriptionForeground); font-size: .9em; flex: 1; }
+
+.btn {
+  font-family: inherit;
+  font-size: .88em;
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+.btn.ghost {
+  background: transparent;
+  color: var(--vscode-foreground);
+  border-color: var(--vscode-panel-border);
+}
+.btn.ghost:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); }
+.btn.danger {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border-color: var(--vscode-panel-border);
+}
+.btn:disabled { opacity: .4; cursor: default; }
+
+.btn.fav {
+  color: var(--vscode-descriptionForeground);
+  border-color: transparent;
+}
+.btn.fav:hover:not(:disabled) { color: var(--vscode-foreground); }
+.btn.fav.on {
+  color: var(--vscode-charts-yellow, #d7ba7d);
+  border-color: transparent;
+}
+
+.btn.iconbtn {
+  padding: 4px 8px;
+  font-size: 1.05em;
+  line-height: 1.15;
+  color: var(--vscode-descriptionForeground);
+}
+.btn.iconbtn:hover:not(:disabled) { color: var(--vscode-foreground); }
+
+/* ── toast ── */
+.toast {
+  display: none;
+  padding: 6px 16px;
+  font-size: .9em;
+  background: var(--vscode-inputValidation-infoBackground, var(--vscode-list-hoverBackground));
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.toast.show { display: block; }
+.toast.err {
+  background: var(--vscode-inputValidation-errorBackground, transparent);
+  color: var(--vscode-errorForeground);
+}
+
+/* ── layout principal ── */
+.grid {
+  display: grid;
+  grid-template-columns: var(--sidebar-w, 220px) 5px 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+h2 {
+  font-size: .72em;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+/* ── barra lateral de apps ── */
+.sidebar {
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.applist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.appitem {
+  font-family: inherit;
+  font-size: 1em;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+}
+.appitem:hover { background: var(--vscode-list-hoverBackground); }
+.appitem.sel {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.appitem .body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.appitem .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appitem .sub {
+  font-size: .78em;
+  opacity: .75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* cuadrito de la maqueta */
+.sq {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  border: 1.5px solid currentColor;
+  opacity: .55;
+}
+.sq.on {
+  background: var(--vscode-charts-green, #3fb950);
+  border-color: var(--vscode-charts-green, #3fb950);
+  opacity: 1;
+}
+
+/* ── panel de dispositivos ── */
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.devtabs {
+  padding: 10px 16px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto;
+}
+.devgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dev {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--vscode-editorWidget-background, transparent);
+}
+.dev.click { cursor: pointer; }
+.dev.click:hover { background: var(--vscode-list-hoverBackground); }
+.dev.live { border-color: var(--vscode-charts-green, #3fb950); }
+.dev.off { opacity: .8; }
+
+.devhead { display: flex; align-items: center; justify-content: space-between; min-height: 14px; }
+.devname { font-weight: 600; font-size: 1.02em; }
+.devsub {
+  font-size: .8em;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.devstate {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .82em;
+  margin-top: 2px;
+  color: var(--vscode-descriptionForeground);
+}
+.devactions { display: flex; gap: 5px; margin-top: 8px; }
+.devactions .btn { flex: 0 1 auto; }
+.devactions .btn:first-child { flex: 1; }
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--vscode-charts-green, #3fb950);
+}
+.dot.off { background: var(--vscode-descriptionForeground); opacity: .55; }
+
+.pill {
+  font-size: .7em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border);
+  color: var(--vscode-descriptionForeground);
+}
+
+.empty {
+  grid-column: 1 / -1;
+  color: var(--vscode-descriptionForeground);
+  font-size: .9em;
+  padding: 10px 2px;
+  line-height: 1.55;
+}
+
+/* ── tabs (compartido por dispositivos y logs) ── */
+.tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.tab {
+  font-family: inherit;
+  font-size: .86em;
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--vscode-foreground); }
+.tab.active {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-focusBorder);
+}
+.tab-spacer { flex: 1; }
+
+/* ── logs ── */
+.logs {
+  flex: 0 0 var(--logs-h, 34%);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.logs .tabs { padding: 4px 8px 0; }
+.log {
+  margin: 0;
+  padding: 8px 16px 16px;
+  overflow: auto;
+  flex: 1 1 auto;
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-editor-font-size);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log .meta { color: var(--vscode-descriptionForeground); }
+.log .error { color: var(--vscode-errorForeground); }
+
+.empty .path {
+  font-family: var(--vscode-editor-font-family);
+  font-size: .92em;
+  opacity: .85;
+  margin-top: 5px;
+  word-break: break-all;
+}
+
+/* ── drag & drop ── */
+.appitem[draggable="true"] { user-select: none; }
+.appitem.dragging { opacity: .45; }
+
+/* Mientras se arrastra, los destinos validos se marcan sin taparse entre si. */
+body.dragmode .dev.target {
+  border-style: dashed;
+  border-color: var(--vscode-focusBorder);
+}
+.dev.drop {
+  border-style: solid;
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-dropBackground, var(--vscode-list-hoverBackground));
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.hint {
+  font-size: .78em;
+  color: var(--vscode-descriptionForeground);
+  padding-right: 16px;
+  white-space: nowrap;
+  opacity: .8;
+}
+
+/* ── apps corriendo dentro de una tarjeta de dispositivo ── */
+.runlist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.runrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.runrow:hover { background: var(--vscode-list-hoverBackground); }
+.runrow.sel { background: var(--vscode-list-inactiveSelectionBackground); }
+
+.runinfo { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.runname {
+  font-size: .88em;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.runstate { font-size: .74em; color: var(--vscode-descriptionForeground); }
+
+.runacts { display: flex; gap: 3px; flex: 0 0 auto; }
+.btn.icon {
+  padding: 3px 7px;
+  font-size: .82em;
+  line-height: 1.2;
+}
+
+/* ── iconos de app ── */
+.appicon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--vscode-editor-background);
+}
+.appicon.on { box-shadow: 0 0 0 1.5px var(--vscode-charts-green, #3fb950); }
+
+.runrow .appicon { width: 16px; height: 16px; border-radius: 4px; }
+
+.headright { display: flex; align-items: center; gap: 5px; }
+.devhead .btn.icon { padding: 1px 7px; line-height: 1.3; opacity: .65; }
+.dev:hover .devhead .btn.icon { opacity: 1; }
+
+/* ── encabezados de grupo dentro del grid de dispositivos ── */
+.groupheader {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .7em;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 6px;
+}
+.groupheader:first-child { margin-top: 0; }
+.groupheader::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--vscode-panel-border);
+}
+.groupcount {
+  order: 1;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-panel-border);
+  letter-spacing: 0;
+}
+
+
+/* ── divisores arrastrables ── */
+.vsplit,
+.hsplit {
+  flex: 0 0 auto;
+  position: relative;
+  background: var(--vscode-panel-border);
+  touch-action: none;
+}
+.vsplit { cursor: col-resize; }
+.hsplit { height: 5px; cursor: row-resize; }
+
+/* La zona sensible es mayor que la linea visible, como en VS Code. */
+.vsplit::after,
+.hsplit::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+.vsplit:hover,
+.hsplit:hover,
+.vsplit.dragging,
+.hsplit.dragging {
+  background: var(--vscode-focusBorder);
+  transition: background 80ms linear 120ms;
+}
+
+/* Durante el arrastre el cursor manda sobre todo lo demas. */
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }

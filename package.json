@@ -1,0 +1,65 @@
+{
+  "name": "novasuite-runner",
+  "displayName": "NovaSuite Runner",
+  "description": "Corre las apps Flutter del workspace en cualquier dispositivo con un click o arrastrando. Parte de NovaSuiteTools.",
+  "version": "0.11.3",
+  "publisher": "yashiroiori",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#4F46E5",
+    "theme": "dark"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "flutter",
+    "dart",
+    "devices",
+    "runner",
+    "monorepo",
+    "novasuite"
+  ],
+  "activationEvents": [],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "novasuiteRunner.open",
+        "title": "NovaSuite Runner: Abrir panel",
+        "category": "NovaSuite Runner",
+        "icon": "$(rocket)"
+      }
+    ],
+    "configuration": {
+      "title": "NovaSuite Runner",
+      "properties": {
+        "novasuiteRunner.flutterPath": {
+          "type": "string",
+          "default": "flutter",
+          "description": "Ruta al ejecutable de Flutter. Cambiala si el IDE no hereda tu PATH (ej. /opt/flutter/bin/flutter)."
+        },
+        "novasuiteRunner.extraRunArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Argumentos extra para flutter run (ej. [\"--dart-define=ENV=dev\"])."
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FatNayDev/novasuite-runner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FatNayDev/novasuite-runner/issues"
+  },
+  "homepage": "https://github.com/FatNayDev/novasuite-runner#readme"
+}
