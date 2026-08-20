@@ -443,19 +443,62 @@ function upsertDevice(params) {
   pushState();
 }
 
+/**
+ * CoreSimulator se cuelga con cierta frecuencia: launchd_sim se queda sin responder
+ * y a partir de ahi NINGUN simulador arranca hasta reiniciar el servicio. simctl lo
+ * reporta como POSIX 60 / SimLaunchHostService, no como un fallo del simulador.
+ */
+function isCoreSimulatorStuck(err) {
+  const m = String((err && err.message) || '');
+  return (
+    /launchd_sim/.test(m) ||
+    /SimLaunchHostService/.test(m) ||
+    /launchd failed to respond/.test(m) ||
+    /code=60/.test(m)
+  );
+}
+
+function bootIosSimulator(id, name, healed) {
+  post({ type: 'toast', message: `Arrancando ${name}…` });
+
+  cp.execFile('xcrun', ['simctl', 'boot', id], { timeout: 120000 }, async (err) => {
+    const msg = String((err && err.message) || '');
+
+    // Ya estaba arrancado: no es un error, solo falta traer la ventana al frente.
+    if (err && !/current state: Booted/.test(msg)) {
+      if (isCoreSimulatorStuck(err) && !healed) {
+        const ok = await vscode.window.showWarningMessage(
+          `No se pudo arrancar ${name}: el servicio CoreSimulator de macOS dejo de responder.\n\n` +
+            'Se puede reiniciar el servicio y volver a intentarlo. Esto cierra todos los simuladores abiertos.',
+          { modal: true },
+          'Reiniciar y reintentar'
+        );
+        if (ok !== 'Reiniciar y reintentar') return;
+
+        post({ type: 'toast', message: 'Reiniciando CoreSimulator…' });
+        cp.execFile('killall', ['-9', 'com.apple.CoreSimulator.CoreSimulatorService'], () => {
+          // El servicio tarda un par de segundos en volver a levantarse.
+          setTimeout(() => bootIosSimulator(id, name, true), 3000);
+        });
+        return;
+      }
+
+      post({ type: 'error', message: toolError(`xcrun simctl boot ${id}`, err) });
+      return;
+    }
+
+    // simctl boot no abre la ventana: sin esto arranca headless.
+    cp.execFile('open', ['-a', 'Simulator'], () => {});
+    post({ type: 'toast', message: `${name} arrancado.` });
+    setTimeout(queryDaemon, 3000);
+  });
+}
+
 function launchEmulator(id, cold) {
   const entry = cache.emulators.find((e) => e.id === id);
 
   if (entry && entry.kind === 'ios') {
-    post({ type: 'toast', message: `Arrancando ${entry.name}…` });
-    runSteps(
-      [
-        ['xcrun', ['simctl', 'boot', id]],
-        // simctl boot no abre la ventana: sin esto arranca headless.
-        ['open', ['-a', 'Simulator'], { ignoreError: true }],
-      ],
-      `Arrancando ${entry.name}`
-    );
+    bootIosSimulator(id, entry.name);
     return;
   }
 

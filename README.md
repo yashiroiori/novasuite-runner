@@ -9,6 +9,8 @@ a hacer `cd` y a recordar IDs de dispositivo.
 
 Sin terminal, sin copiar IDs, sin una ventana por app.
 
+![NovaSuite Runner](https://raw.githubusercontent.com/yashiroiori/novasuite-runner/main/media/screenshot.png)
+
 ---
 
 ## Instalar
@@ -16,7 +18,7 @@ Sin terminal, sin copiar IDs, sin una ventana por app.
 Desde el `.vsix`:
 
 ```bash
-code --install-extension novasuite-runner-0.10.0.vsix
+code --install-extension novasuite-runner-0.11.5.vsix
 ```
 
 En Antigravity, Windsurf, Cursor o VSCodium: **Extensions → `⋯` → Install from VSIX**.
@@ -263,6 +265,14 @@ Los IDEs lanzados desde el Dock no heredan el `PATH` de tu shell.
 **No aparecen los simuladores de iOS.** Requiere Xcode instalado y
 `xcrun simctl list devices` funcionando desde tu terminal.
 
+**Un simulador de iOS no arranca** y `simctl` responde
+`launchd_sim may have crashed or quit responding`. Es CoreSimulator colgado, no el
+simulador: mientras siga así no arranca ninguno. La extensión lo detecta al arrancar
+y ofrece **Reiniciar y reintentar**, que mata
+`com.apple.CoreSimulator.CoreSimulatorService` (macOS lo relanza solo) y vuelve a
+intentar el boot. Cierra todos los simuladores abiertos. La misma acción está en el
+menú `⋯ → Reparar` de un simulador que sí aparece en la lista.
+
 **Las acciones de Android fallan.** Se necesita el SDK en una de las rutas
 conocidas, o `ANDROID_HOME` exportado en el entorno del que arrancó el IDE.
 
@@ -284,10 +294,8 @@ reload y restart son peticiones JSON por stdin.
 
 Sin dependencias ni compilación — JavaScript plano.
 
-Abre esta carpeta en VS Code o Antigravity y pulsa **F5** — arranca una ventana
-con la extensión cargada (config `Run Extension`).
-
 ```bash
+# F5 desde la raíz del repo con la config "NovaSuite Runner (Extension Host)"
 npx @vscode/vsce package        # genera el .vsix
 ```
 

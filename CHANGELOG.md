@@ -2,6 +2,18 @@
 
 Todas las versiones notables de NovaSuite Runner.
 
+## [0.11.5] — 2026-08-20
+
+### Arreglado
+- Arrancar un simulador de iOS ya no muere con el error crudo de `simctl` cuando
+  CoreSimulator se cuelga (`launchd_sim may have crashed`, POSIX 60): la extension
+  lo detecta y ofrece reiniciar el servicio y reintentar el arranque.
+- Un simulador que ya estaba arrancado deja de reportarse como error; solo trae la
+  ventana al frente.
+
+### Agregado
+- Captura del panel en el README.
+
 ## [0.11.4] — 2026-08-20
 
 ### Cambiado
