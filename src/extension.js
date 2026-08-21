@@ -11,21 +11,70 @@ const SKIP_DIRS = new Set([
 
 /** key -> { key, project, device, proc, appId, status, logs, reqId } */
 const sessions = new Map();
+const builds = new Map();
 
 let panel = null;
+let view = null;                // la misma UI hospedada en la barra lateral
+let extUri = null;
 let daemon = null;
 let cache = { devices: [], emulators: [], projects: [], roots: [], busy: false };
 
 const FAV_KEY = 'novasuiteRunner.favorites';
-let store = null;              // globalState: los favoritos sobreviven al reinstalar
+const PROFILE_KEY = 'novasuiteRunner.profiles';
+const WIFI_KEY = 'novasuiteRunner.wifiHosts';
+
+let store = null;              // globalState: favoritos y perfiles sobreviven al reinstalar
 let favorites = new Set();
+let profiles = {};             // dir -> { mode, flavor, dartDefines[] }
+let wifiHosts = [];            // ips usadas con adb connect, para no re-teclearlas
+const recordings = new Map();  // deviceId -> { proc, file, device }
 
 function activate(context) {
   store = context.globalState;
+  extUri = context.extensionUri;
   favorites = new Set(store.get(FAV_KEY, []));
+  profiles = store.get(PROFILE_KEY, {});
+  wifiHosts = store.get(WIFI_KEY, []);
+
   context.subscriptions.push(
-    vscode.commands.registerCommand('novasuiteRunner.open', () => openPanel(context))
+    vscode.commands.registerCommand('novasuiteRunner.open', () => openPanel(context)),
+    vscode.window.registerWebviewViewProvider('novasuiteRunner.view', {
+      resolveWebviewView(v) {
+        view = v;
+        v.webview.options = webviewOptions(context);
+        v.webview.html = buildHtml(v.webview, context.extensionUri);
+        v.webview.onDidReceiveMessage((msg) => handleMessage(msg));
+        v.onDidDispose(() => { view = null; maybeStopDaemon(); });
+        scanProjects();
+        ensureDaemon();
+      },
+    })
   );
+
+  watchForReload(context);
+}
+
+function webviewOptions(context) {
+  return {
+    enableScripts: true,
+    retainContextWhenHidden: true,
+    localResourceRoots: [
+      vscode.Uri.joinPath(context.extensionUri, 'media'),
+      ...(vscode.workspace.workspaceFolders || []).map((f) => f.uri),
+    ],
+  };
+}
+
+function hosts() {
+  return [panel, view].filter(Boolean).map((h) => h.webview);
+}
+
+function maybeStopDaemon() {
+  if (hosts().length) return;
+  if (daemon && daemon.proc) {
+    try { daemon.proc.kill('SIGTERM'); } catch {}
+    daemon = null;
+  }
 }
 
 function toggleFavorite(id) {
@@ -56,14 +105,7 @@ function openPanel(context) {
     'novasuiteRunner',
     'NovaSuite Runner',
     vscode.ViewColumn.Active,
-    {
-      enableScripts: true,
-      retainContextWhenHidden: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(context.extensionUri, 'media'),
-        ...(vscode.workspace.workspaceFolders || []).map((f) => f.uri),
-      ],
-    }
+    webviewOptions(context)
   );
 
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.svg');
@@ -73,11 +115,8 @@ function openPanel(context) {
 
   panel.onDidDispose(() => {
     panel = null;
-    if (daemon && daemon.proc) {
-      try { daemon.proc.kill('SIGTERM'); } catch {}
-      daemon = null;
-    }
     // Los procesos siguen vivos a proposito: cerrar el panel no mata tus apps.
+    maybeStopDaemon();
   }, null, context.subscriptions);
 
   scanProjects();
@@ -85,7 +124,7 @@ function openPanel(context) {
 }
 
 function post(msg) {
-  if (panel) panel.webview.postMessage(msg);
+  for (const w of hosts()) w.postMessage(msg);
 }
 
 function pushState() {
@@ -95,11 +134,19 @@ function pushState() {
     emulators: cache.emulators,
     projects: cache.projects.map((p) => ({
       ...p,
-      iconUri: p.icon && panel ? panel.webview.asWebviewUri(vscode.Uri.file(p.icon)).toString() : null,
+      iconUri: p.icon && hosts()[0] ? hosts()[0].asWebviewUri(vscode.Uri.file(p.icon)).toString() : null,
+      profile: profileLabel(p.dir),
     })),
     roots: cache.roots,
     busy: cache.busy,
     favorites: [...favorites],
+    builds: [...builds.values()].map((b) => ({
+      key: b.key,
+      projectDir: b.project.dir,
+      projectName: b.project.name,
+      targetLabel: b.targetLabel,
+      status: b.status,
+    })),
     sessions: [...sessions.values()].map((s) => ({
       key: s.key,
       projectDir: s.project.dir,
@@ -107,7 +154,9 @@ function pushState() {
       deviceId: s.device.id,
       deviceName: s.device.name,
       status: s.status,
+      devtools: !!(s.devtoolsUrl || s.vmServiceHttp),
     })),
+    recording: [...recordings.keys()],
   });
 }
 
@@ -117,6 +166,9 @@ function handleMessage(msg) {
       pushState();
       for (const s of sessions.values()) {
         post({ type: 'logs', key: s.key, lines: s.logs });
+      }
+      for (const b of builds.values()) {
+        post({ type: 'logs', key: b.key, lines: b.logs });
       }
       break;
     case 'refresh':
@@ -144,8 +196,26 @@ function handleMessage(msg) {
     case 'repair':
       repairDevice(msg.deviceId);
       break;
+    case 'build':
+      appMenu(msg.dir);
+      break;
+    case 'devtools':
+      openDevTools(msg.key);
+      break;
+    case 'deviceMenu':
+      deviceMenu(msg.deviceId);
+      break;
+    case 'wifiConnect':
+      wifiConnect();
+      break;
+    case 'saveLog':
+      saveLog(msg.name, msg.text);
+      break;
+    case 'cancelBuild':
+      cancelBuild(msg.key);
+      break;
     case 'clearLogs': {
-      const s = sessions.get(msg.key);
+      const s = sessions.get(msg.key) || builds.get(msg.key);
       if (s) s.logs = [];
       post({ type: 'logs', key: msg.key, lines: [] });
       break;
@@ -294,8 +364,8 @@ function ensureDaemon() {
   proc.on('close', () => {
     daemon = null;
     cache.busy = false;
-    // Solo lo revivimos si el panel sigue abierto; si no, que quede muerto.
-    if (panel) setTimeout(() => { if (panel) ensureDaemon(); }, 3000);
+    // Solo lo revivimos si queda alguna vista abierta; si no, que quede muerto.
+    if (hosts().length) setTimeout(() => { if (hosts().length) ensureDaemon(); }, 3000);
   });
 
   return true;
@@ -714,6 +784,708 @@ function toolError(cmd, err) {
 
 // ─────────────────────────────────────────── ejecucion
 
+// ─────────────────────────────────────────── devtools
+
+function openDevTools(key) {
+  const session = sessions.get(key);
+  if (!session) return;
+
+  // El daemon manda app.debugPort con la URI del VM service; DevTools sale en el log.
+  const url = session.devtoolsUrl || session.vmServiceHttp;
+  if (!url) {
+    post({
+      type: 'error',
+      message: 'Todavia no hay URI del depurador para esta app. Espera a que termine de arrancar.',
+    });
+    return;
+  }
+
+  vscode.env.openExternal(vscode.Uri.parse(url));
+  if (!session.devtoolsUrl) {
+    vscode.env.clipboard.writeText(url);
+    post({
+      type: 'toast',
+      message: 'Abriendo el VM service; la URI tambien quedo en el portapapeles.',
+    });
+  }
+}
+
+// ─────────────────────────────────────────── acciones de dispositivo
+
+function androidDevices() {
+  return cache.devices.filter((d) => String(d.platform || '').startsWith('android'));
+}
+
+function androidSdkDir() {
+  const home = require('os').homedir();
+  const candidates = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    path.join(home, 'Library', 'Android', 'sdk'),
+    path.join(home, 'Android', 'Sdk'),
+    path.join(home, 'AppData', 'Local', 'Android', 'Sdk'),
+  ].filter(Boolean);
+  return candidates.find((dir) => fs.existsSync(dir)) || null;
+}
+
+function androidEmulatorBin() {
+  const sdk = androidSdkDir();
+  if (!sdk) return null;
+  const exe = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
+  for (const rel of [['emulator', exe], ['tools', exe]]) {
+    const bin = path.join(sdk, ...rel);
+    if (fs.existsSync(bin)) return bin;
+  }
+  return null;
+}
+
+function adbBin() {
+  const sdk = androidSdkDir();
+  if (sdk) {
+    const bin = path.join(sdk, 'platform-tools', 'adb');
+    if (fs.existsSync(bin)) return bin;
+  }
+  return 'adb';
+}
+
+function shotDir() {
+  const dir = path.join(require('os').tmpdir(), 'novasuite-runner');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+
+function stamp() {
+  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+}
+
+function isIosSim(d) {
+  return String(d.platform || '').startsWith('ios') && d.emulator;
+}
+
+async function deviceMenu(deviceId) {
+  const d = cache.devices.find((x) => x.id === deviceId);
+  if (!d) return;
+
+  const android = String(d.platform || '').startsWith('android');
+  const rec = recordings.get(d.id);
+  const items = [];
+
+  if (android || isIosSim(d)) {
+    items.push({ ...SEP, label: 'Capturar' });
+    items.push({ id: 'shot', label: 'Captura de pantalla', description: 'Guarda un PNG y lo abre' });
+    items.push(
+      rec
+        ? { id: 'recStop', label: 'Detener la grabacion', description: 'Guarda el video y lo abre' }
+        : { id: 'recStart', label: 'Grabar la pantalla', description: 'Se detiene desde este mismo menu' }
+    );
+  }
+
+  if (android) {
+    items.push({ ...SEP, label: 'Instalar' });
+    items.push({ id: 'install', label: 'Instalar un APK…', description: 'adb install -r' });
+    items.push({ ...SEP, label: 'Red' });
+    items.push({
+      id: 'tcpip',
+      label: 'Habilitar ADB por WiFi',
+      description: 'adb tcpip 5555, para desconectar el cable',
+    });
+  }
+
+  const repairs = repairItems(d);
+  if (repairs.length) {
+    items.push({ ...SEP, label: 'Reparar' });
+    for (const r of repairs) items.push({ ...r, id: 'repair' });
+  }
+
+  if (!items.length) {
+    vscode.window.showInformationMessage(`No hay acciones disponibles para ${d.name}.`);
+    return;
+  }
+
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: d.name,
+    matchOnDetail: true,
+  });
+  if (!pick) return;
+
+  switch (pick.id) {
+    case 'shot': return screenshot(d);
+    case 'recStart': return startRecording(d);
+    case 'recStop': return stopRecording(d);
+    case 'install': return pickAndInstall(d);
+    case 'tcpip': return enableTcpip(d);
+    case 'repair': {
+      if (pick.confirm) {
+        const ok = await vscode.window.showWarningMessage(pick.confirm, { modal: true }, 'Continuar');
+        if (ok !== 'Continuar') return;
+      }
+      if (pick.run) return pick.run();
+      return runSteps(pick.steps, pick.label);
+    }
+  }
+}
+
+function revealResult(file, message) {
+  vscode.window.showInformationMessage(message, 'Mostrar archivo', 'Copiar ruta').then((a) => {
+    if (a === 'Mostrar archivo') vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(file));
+    else if (a === 'Copiar ruta') vscode.env.clipboard.writeText(file);
+  });
+}
+
+function screenshot(d) {
+  const file = path.join(shotDir(), `${d.name.replace(/\W+/g, '_')}-${stamp()}.png`);
+  post({ type: 'toast', message: `${d.name}: capturando…` });
+
+  const done = (err) => {
+    if (err) {
+      post({ type: 'error', message: toolError('captura de pantalla', err) });
+      return;
+    }
+    revealResult(file, `Captura de ${d.name} guardada.`);
+  };
+
+  if (isIosSim(d)) {
+    cp.execFile('xcrun', ['simctl', 'io', d.id, 'screenshot', file], { timeout: 60000 }, done);
+    return;
+  }
+
+  // exec-out entrega el PNG binario sin las conversiones de fin de linea de adb shell.
+  const out = fs.createWriteStream(file);
+  const proc = cp.spawn(adbBin(), ['-s', d.id, 'exec-out', 'screencap', '-p']);
+  proc.stdout.pipe(out);
+  proc.on('error', done);
+  proc.on('close', (code) => {
+    out.end();
+    done(code === 0 ? null : new Error(`adb salio con codigo ${code}`));
+  });
+}
+
+function startRecording(d) {
+  if (recordings.has(d.id)) return;
+  const ext = isIosSim(d) ? 'mp4' : 'mp4';
+  const file = path.join(shotDir(), `${d.name.replace(/\W+/g, '_')}-${stamp()}.${ext}`);
+
+  let proc;
+  if (isIosSim(d)) {
+    proc = cp.spawn('xcrun', ['simctl', 'io', d.id, 'recordVideo', '--force', file]);
+  } else {
+    // screenrecord graba dentro del telefono; al parar hay que traerse el archivo.
+    proc = cp.spawn(adbBin(), ['-s', d.id, 'shell', 'screenrecord', '/sdcard/nsr-rec.mp4']);
+  }
+
+  recordings.set(d.id, { proc, file, device: d });
+  pushState();
+  post({ type: 'toast', message: `${d.name}: grabando… detenla desde el menu ⋯` });
+
+  proc.on('error', (err) => {
+    recordings.delete(d.id);
+    pushState();
+    post({ type: 'error', message: toolError('grabacion de pantalla', err) });
+  });
+}
+
+function stopRecording(d) {
+  const rec = recordings.get(d.id);
+  if (!rec) return;
+  recordings.delete(d.id);
+  pushState();
+
+  // Ambas herramientas cierran el archivo al recibir SIGINT, no antes.
+  try { rec.proc.kill('SIGINT'); } catch {}
+
+  if (isIosSim(d)) {
+    setTimeout(() => revealResult(rec.file, `Video de ${d.name} guardado.`), 1200);
+    return;
+  }
+
+  post({ type: 'toast', message: `${d.name}: bajando el video…` });
+  setTimeout(() => {
+    cp.execFile(
+      adbBin(),
+      ['-s', d.id, 'pull', '/sdcard/nsr-rec.mp4', rec.file],
+      { timeout: 120000 },
+      (err) => {
+        if (err) {
+          post({ type: 'error', message: toolError('adb pull', err) });
+          return;
+        }
+        cp.execFile(adbBin(), ['-s', d.id, 'shell', 'rm', '/sdcard/nsr-rec.mp4'], () => {});
+        revealResult(rec.file, `Video de ${d.name} guardado.`);
+      }
+    );
+  }, 1500);
+}
+
+async function pickAndInstall(d) {
+  const files = await vscode.window.showOpenDialog({
+    canSelectMany: false,
+    openLabel: 'Instalar',
+    filters: { APK: ['apk'] },
+  });
+  if (!files || !files.length) return;
+  install(d, files[0].fsPath);
+}
+
+async function installApk(apks) {
+  const targets = androidDevices();
+  if (!targets.length) {
+    post({ type: 'error', message: 'No hay dispositivos Android conectados.' });
+    return;
+  }
+
+  const device =
+    targets.length === 1
+      ? targets[0]
+      : await vscode.window
+          .showQuickPick(
+            targets.map((d) => ({ label: d.name, description: d.id, device: d })),
+            { placeHolder: 'Instalar en…' }
+          )
+          .then((x) => x && x.device);
+  if (!device) return;
+
+  // Con --split-per-abi hay tres APK y solo uno le sirve al telefono.
+  const apk =
+    apks.length === 1
+      ? apks[0]
+      : await vscode.window
+          .showQuickPick(
+            apks.map((f) => ({ label: path.basename(f), description: f })),
+            { placeHolder: 'Cual APK' }
+          )
+          .then((x) => x && x.description);
+  if (!apk) return;
+
+  install(device, apk);
+}
+
+function install(d, apk) {
+  post({ type: 'toast', message: `${d.name}: instalando ${path.basename(apk)}…` });
+  cp.execFile(adbBin(), ['-s', d.id, 'install', '-r', apk], { timeout: 300000 }, (err, stdout) => {
+    if (err) {
+      post({ type: 'error', message: toolError('adb install', err) });
+      return;
+    }
+    const failed = /Failure \[([^\]]+)\]/.exec(String(stdout));
+    if (failed) {
+      post({ type: 'error', message: `adb install fallo: ${failed[1]}` });
+      return;
+    }
+    post({ type: 'toast', message: `${d.name}: instalado.` });
+  });
+}
+
+function enableTcpip(d) {
+  runSteps([[adbBin(), ['-s', d.id, 'tcpip', '5555']]], `${d.name}: ADB por WiFi`);
+  vscode.window.showInformationMessage(
+    `${d.name} escucha en el puerto 5555. Desconecta el cable y usa "Conectar por WiFi" con la IP del telefono.`
+  );
+}
+
+async function wifiConnect() {
+  const items = [
+    ...wifiHosts.map((h) => ({ label: h, description: 'usado antes' })),
+    { label: 'Otra direccion…', alwaysShow: true },
+  ];
+
+  let host;
+  if (wifiHosts.length) {
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Conectar por WiFi' });
+    if (!pick) return;
+    host = pick.label === 'Otra direccion…' ? null : pick.label;
+  }
+
+  if (!host) {
+    const v = await vscode.window.showInputBox({
+      prompt: 'IP del dispositivo (el puerto por defecto es 5555)',
+      placeHolder: '192.168.0.15',
+      validateInput: (x) => (/^[\d.]+(:\d+)?$/.test(x.trim()) ? null : 'Escribe una IP, por ejemplo 192.168.0.15'),
+    });
+    if (!v) return;
+    host = v.trim();
+  }
+
+  const target = host.includes(':') ? host : `${host}:5555`;
+  post({ type: 'toast', message: `Conectando con ${target}…` });
+
+  cp.execFile(adbBin(), ['connect', target], { timeout: 30000 }, (err, stdout) => {
+    const out = String(stdout || '');
+    if (err || /unable to connect|failed to connect/i.test(out)) {
+      post({ type: 'error', message: `adb connect ${target} fallo: ${out.trim() || (err && err.message)}` });
+      return;
+    }
+    wifiHosts = [host, ...wifiHosts.filter((h) => h !== host)].slice(0, 8);
+    if (store) store.update(WIFI_KEY, wifiHosts);
+    post({ type: 'toast', message: `Conectado con ${target}.` });
+    setTimeout(queryDaemon, 1500);
+  });
+}
+
+async function saveLog(name, text) {
+  if (!text) {
+    post({ type: 'error', message: 'No hay nada que guardar en esta pestana.' });
+    return;
+  }
+
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.file(path.join(shotDir(), `${name || 'log'}-${stamp()}.log`)),
+    filters: { Log: ['log', 'txt'] },
+  });
+  if (!target) return;
+
+  try {
+    fs.writeFileSync(target.fsPath, text, 'utf8');
+  } catch (err) {
+    post({ type: 'error', message: `No se pudo guardar el log: ${err.message}` });
+    return;
+  }
+  revealResult(target.fsPath, 'Log guardado.');
+}
+
+// ─────────────────────────────────────────── recarga al guardar
+
+function watchForReload(context) {
+  const watcher = vscode.workspace.createFileSystemWatcher('**/lib/**/*.dart');
+  let timer = null;
+
+  const onChange = (uri) => {
+    if (!cfg().get('reloadOnSave')) return;
+    const file = uri.fsPath;
+    clearTimeout(timer);
+    // Guardar varios archivos de golpe debe disparar un solo reload.
+    timer = setTimeout(() => {
+      for (const s of sessions.values()) {
+        if (s.status !== 'running') continue;
+        if (!file.startsWith(s.project.dir + path.sep)) continue;
+        addLog(s, '⚡ hot reload (archivo guardado)', 'meta');
+        sendRequest(s, 'app.restart', { fullRestart: false, pause: false, reason: 'save' });
+      }
+    }, 300);
+  };
+
+  watcher.onDidChange(onChange);
+  watcher.onDidCreate(onChange);
+  context.subscriptions.push(watcher);
+}
+
+// ─────────────────────────────────────────── perfil de ejecucion
+
+const RUN_MODES = [
+  { id: 'debug', label: 'Debug', description: 'Hot reload disponible; el default de Flutter', args: [] },
+  { id: 'profile', label: 'Profile', description: 'Para medir rendimiento; sin hot reload', args: ['--profile'] },
+  { id: 'release', label: 'Release', description: 'Como lo veria el cliente; sin hot reload', args: ['--release'] },
+];
+
+function profileOf(dir) {
+  return profiles[dir] || { mode: 'debug', flavor: '', dartDefines: [] };
+}
+
+function profileLabel(dir) {
+  const p = profileOf(dir);
+  const bits = [];
+  if (p.mode !== 'debug') bits.push(p.mode);
+  if (p.flavor) bits.push(p.flavor);
+  if (p.dartDefines && p.dartDefines.length) bits.push(`${p.dartDefines.length} define`);
+  return bits.join(' · ');
+}
+
+function saveProfile(dir, patch) {
+  profiles[dir] = { ...profileOf(dir), ...patch };
+  if (store) store.update(PROFILE_KEY, profiles);
+  pushState();
+}
+
+function profileArgs(dir) {
+  const p = profileOf(dir);
+  const mode = RUN_MODES.find((m) => m.id === p.mode) || RUN_MODES[0];
+  return [
+    ...mode.args,
+    ...(p.flavor ? ['--flavor', p.flavor] : []),
+    ...(p.dartDefines || []).map((d) => `--dart-define=${d}`),
+  ];
+}
+
+async function editProfile(dir) {
+  const project = cache.projects.find((x) => x.dir === dir);
+  if (!project) return;
+
+  for (;;) {
+    const p = profileOf(dir);
+    const pick = await vscode.window.showQuickPick(
+      [
+        { id: 'mode', label: 'Modo', description: p.mode },
+        { id: 'flavor', label: 'Flavor', description: p.flavor || 'ninguno' },
+        {
+          id: 'defines',
+          label: 'dart-define',
+          description: (p.dartDefines || []).join(', ') || 'ninguno',
+        },
+        { id: 'reset', label: 'Restablecer', description: 'Volver a debug sin flavor ni defines' },
+      ],
+      { placeHolder: `Perfil de ejecucion de ${project.name}` }
+    );
+    if (!pick) return;
+
+    if (pick.id === 'mode') {
+      const m = await vscode.window.showQuickPick(RUN_MODES, { placeHolder: 'Modo de compilacion' });
+      if (m) saveProfile(dir, { mode: m.id });
+    } else if (pick.id === 'flavor') {
+      const v = await vscode.window.showInputBox({
+        prompt: 'Flavor de Android/iOS (vacio para ninguno)',
+        value: p.flavor || '',
+      });
+      if (v !== undefined) saveProfile(dir, { flavor: v.trim() });
+    } else if (pick.id === 'defines') {
+      const v = await vscode.window.showInputBox({
+        prompt: 'dart-define separados por coma, en formato CLAVE=valor',
+        value: (p.dartDefines || []).join(','),
+        placeHolder: 'ENV=dev,API=https://…',
+      });
+      if (v !== undefined) {
+        saveProfile(dir, {
+          dartDefines: v.split(',').map((x) => x.trim()).filter(Boolean),
+        });
+      }
+    } else if (pick.id === 'reset') {
+      saveProfile(dir, { mode: 'debug', flavor: '', dartDefines: [] });
+    }
+  }
+}
+
+// ─────────────────────────────────────────── menu de la app
+
+const SEP = { label: '', kind: vscode.QuickPickItemKind.Separator };
+
+async function appMenu(dir) {
+  const project = cache.projects.find((p) => p.dir === dir);
+  if (!project) return;
+
+  const building = builds.get(`build::${dir}`);
+  const items = [
+    { ...SEP, label: 'Correr' },
+    {
+      id: 'profile',
+      label: 'Perfil de ejecucion…',
+      description: profileLabel(dir) || 'debug',
+      detail: 'Modo, flavor y dart-define que se usan al correr esta app',
+    },
+    { id: 'runFav', label: 'Correr en los favoritos conectados' },
+    { id: 'runAll', label: 'Correr en todos los dispositivos activos' },
+    { ...SEP, label: 'Compilar' },
+    ...(building
+      ? [{ id: 'cancel', label: 'Cancelar la compilacion en curso', description: building.targetLabel }]
+      : buildTargets().map((t) => ({ ...t, id: 'build' }))),
+    { ...SEP, label: 'Mantenimiento' },
+    ...MAINTENANCE.map((t) => ({ ...t, id: 'maint' })),
+  ];
+
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: project.name,
+    matchOnDetail: true,
+  });
+  if (!pick) return;
+
+  if (pick.id === 'profile') return editProfile(dir);
+  if (pick.id === 'runFav') return runOnMany(dir, 'fav');
+  if (pick.id === 'runAll') return runOnMany(dir, 'all');
+  if (pick.id === 'cancel') return cancelBuild(`build::${dir}`);
+  if (pick.id === 'build') return startBuild(project, pick);
+  if (pick.id === 'maint') return startBuild(project, pick);
+}
+
+const MAINTENANCE = [
+  {
+    label: 'flutter clean',
+    description: 'Borra build/ y .dart_tool/',
+    args: ['clean'],
+  },
+  {
+    label: 'flutter pub get',
+    description: 'Vuelve a resolver las dependencias',
+    args: ['pub', 'get'],
+  },
+  {
+    label: 'flutter doctor -v',
+    description: 'Diagnostico del entorno',
+    args: ['doctor', '-v'],
+  },
+];
+
+function runOnMany(dir, which) {
+  const targets = cache.devices.filter((d) => {
+    if (!d.supported) return false;
+    if (which === 'fav') return favorites.has(d.id) || (d.emulatorId && favorites.has(d.emulatorId));
+    return true;
+  });
+
+  if (!targets.length) {
+    post({ type: 'error', message: which === 'fav'
+      ? 'No hay favoritos conectados ahora mismo.'
+      : 'No hay dispositivos activos.' });
+    return;
+  }
+
+  for (const d of targets) startApp(dir, d.id);
+}
+
+// ─────────────────────────────────────────── compilacion
+
+function buildTargets() {
+  const items = [
+    {
+      label: 'APK (release)',
+      description: 'El instalable normal para repartir a mano',
+      detail: 'flutter build apk --release',
+      args: ['build', 'apk', '--release'],
+    },
+    {
+      label: 'APK por arquitectura',
+      description: 'Tres APK mas chicos: arm64, arm32 y x86_64',
+      detail: 'flutter build apk --release --split-per-abi',
+      args: ['build', 'apk', '--release', '--split-per-abi'],
+    },
+    {
+      label: 'APK (debug)',
+      description: 'Compila mas rapido, pesa mas y va sin optimizar',
+      detail: 'flutter build apk --debug',
+      args: ['build', 'apk', '--debug'],
+    },
+    {
+      label: 'App Bundle (AAB)',
+      description: 'El formato que pide Google Play',
+      detail: 'flutter build appbundle --release',
+      args: ['build', 'appbundle', '--release'],
+    },
+  ];
+
+  if (process.platform === 'darwin') {
+    items.push({
+      label: 'IPA (release)',
+      description: 'Requiere Xcode y un perfil de firma configurado',
+      detail: 'flutter build ipa --release',
+      args: ['build', 'ipa', '--release'],
+    });
+  }
+
+  return items;
+}
+
+function startBuild(project, target) {
+  const dir = project.dir;
+  const key = `build::${dir}`;
+  if (builds.has(key)) {
+    post({ type: 'toast', message: `${project.name} ya tiene una tarea corriendo.` });
+    return;
+  }
+
+  let proc;
+  try {
+    proc = cp.spawn(flutterBin(), target.args, { cwd: dir });
+  } catch (err) {
+    post({ type: 'error', message: toolError('flutter', err) });
+    return;
+  }
+
+  const build = {
+    key,
+    project,
+    proc,
+    targetLabel: target.label,
+    status: 'building',
+    logs: [],
+    artifacts: [],
+  };
+  builds.set(key, build);
+  pushState();
+
+  addLog(build, `▶ flutter ${target.args.join(' ')}  (cwd: ${project.rel})`, 'meta');
+  post({ type: 'toast', message: `${project.name}: ${target.label}…` });
+
+  const onText = (chunk, level) => {
+    const text = String(chunk).trimEnd();
+    if (!text) return;
+    addLog(build, text, level);
+    for (const line of text.split('\n')) {
+      // Flutter anuncia el resultado como "✓ Built build/app/outputs/.../app-release.apk (21.4MB)".
+      const m = line.match(/Built\s+(\S+\.(?:apk|aab|ipa))/);
+      if (m) build.artifacts.push(path.resolve(dir, m[1]));
+    }
+  };
+
+  proc.stdout.on('data', (chunk) => onText(chunk, null));
+  proc.stderr.on('data', (chunk) => onText(chunk, 'error'));
+
+  proc.on('error', (err) => {
+    addLog(build, toolError('flutter', err), 'error');
+    post({ type: 'error', message: toolError('flutter', err) });
+    builds.delete(key);
+    pushState();
+  });
+
+  proc.on('close', (code) => {
+    const cancelled = build.status === 'cancelled';
+    builds.delete(key);
+    pushState();
+
+    if (cancelled) {
+      addLog(build, '■ tarea cancelada', 'meta');
+      post({ type: 'toast', message: `${project.name}: ${target.label} cancelado.` });
+      return;
+    }
+
+    if (code !== 0) {
+      addLog(build, `■ fallo (codigo ${code})`, 'error');
+      post({
+        type: 'error',
+        message: `${project.name}: fallo ${target.label}. Revisa el log.`,
+      });
+      return;
+    }
+
+    addLog(build, `✓ ${target.label} listo`, 'meta');
+    if (build.artifacts.length) announceArtifacts(project, target.label, build.artifacts);
+    else post({ type: 'toast', message: `${project.name}: ${target.label} listo.` });
+  });
+}
+
+function announceArtifacts(project, targetLabel, artifacts) {
+  const found = artifacts.filter((f) => fs.existsSync(f));
+  if (!found.length) {
+    post({ type: 'toast', message: `${project.name}: ${targetLabel} listo.` });
+    return;
+  }
+
+  const sizeMb = found.reduce((acc, f) => acc + fs.statSync(f).size, 0) / 1048576;
+  const many = found.length > 1 ? ` (${found.length} archivos)` : '';
+
+  const installable = found.filter((f) => f.endsWith('.apk'));
+  const actions = ['Mostrar archivo', 'Copiar ruta'];
+  if (installable.length && androidDevices().length) actions.unshift('Instalar en…');
+
+  vscode.window
+    .showInformationMessage(
+      `${project.name}: ${targetLabel} listo${many} · ${sizeMb.toFixed(1)} MB`,
+      ...actions
+    )
+    .then((action) => {
+      if (action === 'Mostrar archivo') {
+        vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(found[0]));
+      } else if (action === 'Copiar ruta') {
+        vscode.env.clipboard.writeText(found.join('\n'));
+      } else if (action === 'Instalar en…') {
+        installApk(installable);
+      }
+    });
+}
+
+function cancelBuild(key) {
+  const build = builds.get(key);
+  if (!build) return;
+  build.status = 'cancelled';
+  pushState();
+  try { build.proc.kill('SIGTERM'); } catch {}
+}
+
 function startApp(dir, deviceId) {
   const project = cache.projects.find((p) => p.dir === dir);
   const device = cache.devices.find((d) => d.id === deviceId);
@@ -726,7 +1498,7 @@ function startApp(dir, deviceId) {
   }
 
   const extra = cfg().get('extraRunArgs') || [];
-  const args = ['run', '--machine', '-d', device.id, ...extra];
+  const args = ['run', '--machine', '-d', device.id, ...profileArgs(dir), ...extra];
 
   let proc;
   try {
@@ -799,6 +1571,12 @@ function handleDaemonEvent(session, msg) {
     session.status = 'running';
     addLog(session, '✓ app iniciada', 'meta');
     pushState();
+  } else if (msg.event === 'app.debugPort') {
+    const p = msg.params || {};
+    // wsUri viene como ws://127.0.0.1:PORT/token=/ws; la forma http es la que abre el navegador.
+    if (p.wsUri) session.vmServiceHttp = String(p.wsUri).replace(/^ws/, 'http').replace(/ws$/, '');
+    else if (p.baseUri) session.vmServiceHttp = String(p.baseUri).replace(/^ws/, 'http');
+    pushState();
   } else if (msg.event === 'app.log') {
     const p = msg.params || {};
     addLog(session, String(p.log || '').trimEnd(), p.error ? 'error' : 'out');
@@ -862,6 +1640,7 @@ function stopApp(key) {
 
 function addLog(session, text, level) {
   if (!text) return;
+  if (session.device) sniffDebugUrls(session, text);
   for (const line of String(text).split('\n')) {
     session.logs.push({ text: line, level });
   }
@@ -869,6 +1648,19 @@ function addLog(session, text, level) {
     session.logs.splice(0, session.logs.length - MAX_LOG_LINES);
   }
   post({ type: 'log', key: session.key, line: { text, level } });
+}
+
+function sniffDebugUrls(session, text) {
+  if (session.devtoolsUrl) return;
+  for (const line of String(text).split('\n')) {
+    if (!/DevTools/i.test(line)) continue;
+    const m = line.match(/https?:\/\/\S+/);
+    if (m) {
+      session.devtoolsUrl = m[0].replace(/[.,)]$/, '');
+      pushState();
+      return;
+    }
+  }
 }
 
 // ─────────────────────────────────────────── html
@@ -905,6 +1697,7 @@ function buildHtml(webview, extensionUri) {
   <main class="grid">
     <aside class="sidebar">
       <h2>Apps</h2>
+      <input id="appfilter" class="filter" type="text" placeholder="Filtrar apps…" aria-label="Filtrar apps">
       <div id="projects" class="applist"></div>
     </aside>
     <div id="vsplit" class="vsplit" title="Arrastra para cambiar el ancho de la lista"></div>
@@ -932,6 +1725,10 @@ function deactivate() {
     try { s.proc.kill('SIGTERM'); } catch {}
   }
   sessions.clear();
+  for (const b of builds.values()) {
+    try { b.proc.kill('SIGTERM'); } catch {}
+  }
+  builds.clear();
 }
 
 module.exports = { activate, deactivate };

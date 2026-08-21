@@ -1,10 +1,12 @@
 const vscode = acquireVsCodeApi();
 
-let state = { devices: [], emulators: [], projects: [], sessions: [], roots: [], busy: false, favorites: [] };
+let state = { devices: [], emulators: [], projects: [], sessions: [], builds: [], roots: [], busy: false, favorites: [], recording: [] };
 let selectedProject = null;   // dir de la app elegida en la barra izquierda
 let deviceTab = 'active';     // 'active' | 'fav' | 'inactive'
 let draggingProject = null;   // dir de la app que se esta arrastrando
 let activeLogTab = null;
+let appFilter = '';
+let logFilter = '';
 const logsByKey = new Map();
 
 const $ = (id) => document.getElementById(id);
@@ -69,6 +71,18 @@ function statusLabel(s) {
 
 function project() {
   return state.projects.find((p) => p.dir === selectedProject) || null;
+}
+
+function buildOn(dir) {
+  return (state.builds || []).find((b) => b.projectDir === dir);
+}
+
+// Las compilaciones comparten el panel de logs con las apps corriendo.
+function logStreams() {
+  return [
+    ...state.sessions.map((s) => ({ key: s.key, label: `${s.projectName} · ${shortName(s.deviceName)}` })),
+    ...(state.builds || []).map((b) => ({ key: b.key, label: `${b.projectName} · ${b.targetLabel}`, build: true })),
+  ];
 }
 
 function sessionOn(deviceId) {
@@ -158,7 +172,17 @@ function renderProjects() {
   if (selectedProject && !state.projects.some((p) => p.dir === selectedProject)) selectedProject = null;
   if (!selectedProject) selectedProject = state.projects[0].dir;
 
-  for (const p of state.projects) {
+  const needle = appFilter.trim().toLowerCase();
+  const shown = needle
+    ? state.projects.filter((p) => (p.name + ' ' + p.rel).toLowerCase().includes(needle))
+    : state.projects;
+
+  if (!shown.length) {
+    box.appendChild(el('div', 'empty', `Ninguna app coincide con "${appFilter}".`));
+    return;
+  }
+
+  for (const p of shown) {
     const mine = state.sessions.filter((s) => s.projectDir === p.dir);
     const row = el('div', 'appitem' + (p.dir === selectedProject ? ' sel' : ''));
     row.tabIndex = 0;
@@ -166,10 +190,23 @@ function renderProjects() {
     row.draggable = true;
     row.appendChild(appIcon(p, mine.length > 0));
 
+    const bld = buildOn(p.dir);
     const body = el('span', 'body');
     body.appendChild(el('span', 'title', p.name));
-    body.appendChild(el('span', 'sub', mine.length ? `${mine.length} corriendo` : p.rel));
+    const sub = bld
+      ? `${bld.targetLabel}…`
+      : mine.length
+        ? `${mine.length} corriendo${p.profile ? ` · ${p.profile}` : ''}`
+        : p.profile || p.rel;
+    body.appendChild(el('span', 'sub', sub));
     row.appendChild(body);
+
+    const build = button(bld ? '■' : '\u2692', 'btn ghost icon buildbtn' + (bld ? ' on' : ''), () => {
+      if (bld) vscode.postMessage({ type: 'cancelBuild', key: bld.key });
+      else vscode.postMessage({ type: 'build', dir: p.dir });
+    });
+    build.title = bld ? 'Cancelar la tarea en curso' : 'Acciones: correr, compilar, mantenimiento…';
+    row.appendChild(build);
 
     row.addEventListener('click', () => {
       selectedProject = p.dir;
@@ -236,6 +273,9 @@ function renderDeviceTabs() {
   if (state.projects.length && state.devices.length) {
     box.appendChild(el('span', 'hint', 'Arrastra una app a un dispositivo'));
   }
+  const wifi = button('WiFi…', 'tab', () => vscode.postMessage({ type: 'wifiConnect' }));
+  wifi.title = 'Conectar un dispositivo Android por red (adb connect)';
+  box.appendChild(wifi);
 }
 
 function renderDevices() {
@@ -338,9 +378,12 @@ function activeCard(d) {
     headRight.appendChild(el('span', 'pill on', `${mine.length} app${mine.length === 1 ? '' : 's'}`));
   }
   headRight.appendChild(favButton(d));
+  if ((state.recording || []).includes(d.id)) {
+    headRight.appendChild(el('span', 'pill rec', 'REC'));
+  }
   const fix = button('⋯', 'btn ghost icon', () =>
-    vscode.postMessage({ type: 'repair', deviceId: d.id }));
-  fix.title = 'Reparar: reiniciar, arranque en frio, borrar datos…';
+    vscode.postMessage({ type: 'deviceMenu', deviceId: d.id }));
+  fix.title = 'Captura, video, instalar APK, ADB por WiFi y reparaciones';
   headRight.appendChild(fix);
   head.appendChild(headRight);
   card.appendChild(head);
@@ -412,6 +455,9 @@ function sessionRow(s) {
 
   const live = s.status === 'running';
   const acts = el('div', 'runacts');
+  const dev = button('◈', 'btn ghost icon', () => vscode.postMessage({ type: 'devtools', key: s.key }), !s.devtools);
+  dev.title = s.devtools ? 'Abrir DevTools' : 'DevTools: esperando la URI del depurador';
+  acts.appendChild(dev);
   acts.appendChild(button('⚡', 'btn ghost icon', () => send('reload', s.key), !live));
   acts.appendChild(button('⟳', 'btn ghost icon', () => send('restart', s.key), !live));
   acts.appendChild(button('■', 'btn danger icon', () => send('stop', s.key)));
@@ -466,12 +512,13 @@ function renderLogTabs() {
   const box = $('tabs');
   box.textContent = '';
 
-  const keys = state.sessions.map((s) => s.key);
+  const streams = logStreams();
+  const keys = streams.map((s) => s.key);
   for (const k of [...logsByKey.keys()]) {
     if (!keys.includes(k)) logsByKey.delete(k);
   }
 
-  if (!state.sessions.length) {
+  if (!streams.length) {
     activeLogTab = null;
     $('log').textContent = '';
     box.appendChild(el('span', 'empty', 'Los logs de las apps que corras aparecen aqui.'));
@@ -480,9 +527,8 @@ function renderLogTabs() {
 
   if (!activeLogTab || !keys.includes(activeLogTab)) activeLogTab = keys[0];
 
-  for (const s of state.sessions) {
-    const t = el('button', 'tab' + (s.key === activeLogTab ? ' active' : ''),
-      `${s.projectName} · ${shortName(s.deviceName)}`);
+  for (const s of streams) {
+    const t = el('button', 'tab' + (s.key === activeLogTab ? ' active' : '') + (s.build ? ' build' : ''), s.label);
     t.addEventListener('click', () => {
       activeLogTab = s.key;
       renderLogTabs();
@@ -492,6 +538,28 @@ function renderLogTabs() {
   }
 
   box.appendChild(el('span', 'tab-spacer'));
+
+  const find = el('input', 'filter logfilter');
+  find.type = 'text';
+  find.placeholder = 'Filtrar…';
+  find.value = logFilter;
+  find.setAttribute('aria-label', 'Filtrar el log');
+  find.addEventListener('input', () => {
+    logFilter = find.value;
+    paintLog();
+  });
+  box.appendChild(find);
+
+  box.appendChild(button('Guardar', 'tab', () => {
+    const lines = (logsByKey.get(activeLogTab) || []).map((l) => l.text);
+    const tab = streams.find((x) => x.key === activeLogTab);
+    vscode.postMessage({
+      type: 'saveLog',
+      name: (tab ? tab.label : 'log').replace(/\W+/g, '-'),
+      text: lines.join('\n'),
+    });
+  }));
+
   box.appendChild(button('Limpiar', 'tab', () => {
     if (activeLogTab) vscode.postMessage({ type: 'clearLogs', key: activeLogTab });
   }));
@@ -499,10 +567,17 @@ function renderLogTabs() {
   paintLog();
 }
 
+function matchesFilter(line) {
+  if (!logFilter) return true;
+  return line.text.toLowerCase().includes(logFilter.toLowerCase());
+}
+
 function paintLog() {
   const pre = $('log');
   pre.textContent = '';
-  for (const line of logsByKey.get(activeLogTab) || []) pre.appendChild(lineNode(line));
+  for (const line of logsByKey.get(activeLogTab) || []) {
+    if (matchesFilter(line)) pre.appendChild(lineNode(line));
+  }
   pre.scrollTop = pre.scrollHeight;
 }
 
@@ -516,7 +591,7 @@ function appendLog(key, line) {
   arr.push(line);
   if (arr.length > 1500) arr.splice(0, arr.length - 1500);
 
-  if (key !== activeLogTab) return;
+  if (key !== activeLogTab || !matchesFilter(line)) return;
   const pre = $('log');
   const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
   pre.appendChild(lineNode(line));
@@ -614,6 +689,11 @@ function makeSplitter(node, axis) {
 makeSplitter($('vsplit'), 'x');
 makeSplitter($('hsplit'), 'y');
 applyLayout(vscode.getState() || {});
+
+$('appfilter').addEventListener('input', (e) => {
+  appFilter = e.target.value;
+  renderProjects();
+});
 
 $('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
 $('settings').addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));

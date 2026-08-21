@@ -436,3 +436,36 @@ body.dragmode .dev.target {
 /* Durante el arrastre el cursor manda sobre todo lo demas. */
 body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
 body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
+
+/* Compilar: el boton solo estorba cuando no se usa, asi que aparece al pasar el mouse. */
+.appitem .buildbtn { opacity: 0; flex: none; }
+.appitem:hover .buildbtn,
+.appitem.sel .buildbtn,
+.appitem .buildbtn:focus-visible,
+.appitem .buildbtn.on { opacity: 1; }
+.appitem .buildbtn.on { color: var(--vscode-charts-red, #f14c4c); }
+
+.tab.build { font-style: italic; }
+
+/* Filtros: mismo alto que los botones para que no bailen las barras. */
+.filter {
+  font-family: inherit;
+  font-size: .86em;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 4px 7px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+}
+.filter:focus { outline: 1px solid var(--vscode-focusBorder); }
+.filter.logfilter { width: 140px; margin: 0 6px; }
+
+.pill.rec {
+  background: var(--vscode-charts-red, #f14c4c);
+  color: #fff;
+  animation: nsrblink 1.4s ease-in-out infinite;
+}
+@keyframes nsrblink { 50% { opacity: .35; } }

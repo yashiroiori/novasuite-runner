@@ -2,6 +2,37 @@
 
 Todas las versiones notables de NovaSuite Runner.
 
+## [0.12.0] — 2026-08-20
+
+### Agregado
+- **Perfiles de ejecucion por app**: modo (debug/profile/release), flavor y
+  `--dart-define`, recordados entre sesiones y visibles en el subtitulo de la app.
+- **Menu de app** (`⚒`) con tres grupos: Correr (perfil, correr en los favoritos
+  conectados, correr en todos los activos), Compilar (APK, split-per-abi, debug,
+  App Bundle, IPA) y Mantenimiento (`clean`, `pub get`, `doctor -v`).
+- **Menu de dispositivo** (`⋯`): captura de pantalla, grabacion de video, instalar
+  un APK, ADB por WiFi y las acciones de reparacion que ya existian.
+- **DevTools** (`◈`) por sesion, abriendo la URL del VM service en el navegador.
+- **Hot reload al guardar**, opcional (`novasuiteRunner.reloadOnSave`).
+- **Filtro de apps** y **filtro + guardado del log** a un archivo.
+- La misma UI **tambien vive en la barra lateral**, no solo en el panel.
+
+### Arreglado
+- `adbBin()`, `androidEmulatorBin()` y `androidSdkDir()` se usaban en todo el
+  modulo pero nunca estuvieron definidas: cualquier accion de emulador Android o
+  de reparacion tiraba `ReferenceError`. Ahora resuelven el SDK desde
+  `ANDROID_HOME`, `ANDROID_SDK_ROOT` y las rutas por defecto de cada plataforma.
+
+## [0.11.6] — 2026-08-20
+
+### Agregado
+- Generar el instalable desde el panel: cada app tiene un boton `⚒` que abre un
+  menu con APK release, APK por arquitectura (`--split-per-abi`), APK debug,
+  App Bundle y, en macOS, IPA.
+- La compilacion transmite su salida a una pestana propia del panel de logs, se
+  puede cancelar, y al terminar avisa el peso del archivo con acciones para
+  revelarlo en el Finder o copiar su ruta.
+
 ## [0.11.5] — 2026-08-20
 
 ### Arreglado

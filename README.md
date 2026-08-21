@@ -18,7 +18,7 @@ Sin terminal, sin copiar IDs, sin una ventana por app.
 Desde el `.vsix`:
 
 ```bash
-code --install-extension novasuite-runner-0.11.5.vsix
+code --install-extension novasuite-runner-0.11.6.vsix
 ```
 
 En Antigravity, Windsurf, Cursor o VSCodium: **Extensions → `⋯` → Install from VSIX**.
@@ -133,6 +133,51 @@ buffer vive en el host de la extensión, no en la vista.
 
 ---
 
+## El menú de cada app
+
+Cada app de la lista trae un botón **`⚒`** a la derecha (aparece al pasar el mouse
+o si es la app seleccionada). Abre un menú con tres grupos.
+
+### Correr
+
+| Opción | Qué hace |
+|---|---|
+| **Perfil de ejecución…** | Modo (`debug` / `profile` / `release`), `--flavor` y `--dart-define` de esa app |
+| **Correr en los favoritos conectados** | Lanza la app en todos tus favoritos vivos, de un golpe |
+| **Correr en todos los dispositivos activos** | Igual, pero sin filtrar por favoritos |
+
+El perfil se guarda por app en el `globalState`, así que sobrevive a recargar la
+ventana. Cuando no es el default, aparece bajo el nombre de la app en la lista
+(`release · prod · 2 define`) para que no compiles en release sin darte cuenta.
+
+Correr en varios dispositivos a la vez es lo que hace usable un flujo que exige
+dos o más equipos emparejados: cada uno es su propio proceso con su propio log.
+
+### Compilar
+
+| Opción | Comando |
+|---|---|
+| APK (release) | `flutter build apk --release` |
+| APK por arquitectura | `flutter build apk --release --split-per-abi` |
+| APK (debug) | `flutter build apk --debug` |
+| App Bundle (AAB) | `flutter build appbundle --release` |
+| IPA (release) | `flutter build ipa --release` *(solo en macOS)* |
+
+La compilación corre en segundo plano y abre su propia pestaña en el panel de
+logs. Mientras dura, la app muestra el avance en la barra izquierda y el botón
+cambia a **`■`** para cancelarla.
+
+Al terminar sale un aviso con el peso del archivo y las acciones **Instalar en…**
+(elige un dispositivo Android y hace `adb install -r`), **Mostrar archivo** y
+**Copiar ruta**. Con `--split-per-abi` te pregunta cuál de los tres APK instalar.
+
+### Mantenimiento
+
+`flutter clean`, `flutter pub get` y `flutter doctor -v`, con la salida en la misma
+pestaña de logs. Es la misma maquinaria que la compilación: se puede cancelar igual.
+
+---
+
 ## Favoritos
 
 Con 30+ simuladores instalados, encontrar el de siempre es lo lento. Marca los
@@ -178,8 +223,8 @@ apagarlo.
 
 ## Reparar un dispositivo
 
-El botón `⋯` de cada tarjeta abre las acciones de rescate, para cuando el emulador
-se queda en negro o pegado en el spinner:
+El grupo **Reparar** del menú `⋯` son las acciones de rescate, para cuando el
+emulador se queda en negro o pegado en el spinner:
 
 | Plataforma | Acción | Comando |
 |---|---|---|
@@ -195,6 +240,91 @@ se queda en negro o pegado en el spinner:
 Las acciones destructivas (borrar contenido, borrar datos) piden confirmación modal
 antes de correr. `adb` y `emulator` se resuelven desde el SDK, no desde el `PATH`,
 porque el IDE no siempre lo hereda.
+
+---
+
+## DevTools
+
+Cada app corriendo tiene un botón **`◈`** junto a `⚡ ⟳ ■`. Abre DevTools en el
+navegador con la sesión ya conectada.
+
+La URL sale de dos lados: el evento `app.debugPort` del daemon (que trae la URI del
+VM service) y la línea de DevTools del propio log. Si solo tenemos la primera, el
+botón abre el VM service y además copia la URI al portapapeles. El botón está en
+gris hasta que la app reporta el depurador.
+
+---
+
+## Captura y video del dispositivo
+
+En el menú **`⋯`** de cada tarjeta:
+
+| Acción | Android | iOS (simulador) |
+|---|---|---|
+| Captura de pantalla | `adb exec-out screencap -p` | `simctl io <id> screenshot` |
+| Grabar la pantalla | `adb shell screenrecord` + `adb pull` | `simctl io <id> recordVideo` |
+
+Los archivos van a una carpeta temporal con nombre `<dispositivo>-<fecha>.png/mp4`,
+y el aviso al terminar ofrece **Mostrar archivo** y **Copiar ruta**. Mientras
+grabas, la tarjeta muestra un badge **REC** parpadeando; se detiene desde el mismo
+menú `⋯`. Ambas herramientas cierran el archivo al recibir la señal de parada, no
+antes, así que el video aparece un momento después.
+
+---
+
+## Instalar un APK
+
+Dos caminos:
+
+- Al terminar una compilación, la acción **Instalar en…** del aviso.
+- En el menú `⋯` de un dispositivo Android, **Instalar un APK…**, que abre el
+  selector de archivos.
+
+Ambos hacen `adb -s <id> install -r`, y si Android responde `Failure [...]` te lo
+muestra en vez de decir que todo salió bien.
+
+---
+
+## ADB por WiFi
+
+Para soltar el cable, en dos pasos:
+
+1. Con el teléfono conectado por USB: menú `⋯ → Habilitar ADB por WiFi`
+   (`adb tcpip 5555`).
+2. Desconecta el cable y usa el botón **WiFi…** de la barra de pestañas de
+   dispositivos: escribe la IP y hace `adb connect <ip>:5555`.
+
+Las IPs que hayas usado quedan guardadas (las últimas 8) y salen en una lista para
+no volver a teclearlas.
+
+---
+
+## Hot reload al guardar
+
+Apagado por defecto. Con `novasuiteRunner.reloadOnSave` en `true`, cada vez que
+guardas un `.dart` dentro de `lib/` se manda hot reload a las apps corriendo de
+**ese** proyecto. Guardar varios archivos de golpe dispara un solo reload
+(300 ms de espera).
+
+---
+
+## Filtrar y guardar el log
+
+La barra de pestañas de logs trae un campo **Filtrar…** que esconde las líneas que
+no coinciden — se aplica también a lo que va llegando en vivo — y un botón
+**Guardar**, que escribe la pestaña activa a un archivo de texto.
+
+---
+
+## Panel o barra lateral
+
+La extensión se puede usar de dos formas, con el mismo estado en las dos:
+
+- **Pestaña del editor** — `Cmd/Ctrl + Shift + P` → *NovaSuite Runner: Abrir panel*.
+- **Barra lateral** — el icono de NovaSuite Runner en la barra de actividad.
+
+Puedes tener las dos abiertas: comparten el daemon, las sesiones y los logs. El
+daemon de dispositivos solo se apaga cuando cierras ambas.
 
 ---
 
@@ -248,6 +378,7 @@ la extensión — las tres cosas son un reinicio del host.
 |---|---|---|
 | `novasuiteRunner.flutterPath` | `flutter` | Ruta absoluta si el IDE no hereda tu PATH |
 | `novasuiteRunner.extraRunArgs` | `[]` | Args extra para `flutter run`, ej. `["--dart-define=ENV=dev"]` |
+| `novasuiteRunner.reloadOnSave` | `false` | Hot reload automático al guardar un `.dart` de `lib/` |
 
 El engrane de la barra superior te lleva directo a estos ajustes.
 
@@ -316,14 +447,30 @@ licencia; de ahí las dos publicaciones.
 ## Estado
 
 Verificado en vivo: descubrimiento de apps e iconos, el daemon de dispositivos
-(alta y baja en tiempo real, medidas arriba), el listado de simuladores por
-`simctl`, arranque de emuladores, las acciones de reparación, y el empaquetado.
+(alta y baja en tiempo real), el listado de simuladores por `simctl`, la
+resolución del SDK de Android (`adb`, `emulator`), la captura de pantalla por
+`adb exec-out screencap` sobre un teléfono real, y el empaquetado del `.vsix`.
 
-**Sin verificar en vivo: `⚡` hot reload y `⟳` hot restart.** El protocolo está
-implementado y el daemon acepta la conexión, pero el build de prueba en macOS no
-terminó dentro de la ventana de tiempo disponible, así que nunca vi ejecutarse un
-`app.restart`. Es lo único de la extensión que no he visto funcionar con mis
-propios ojos.
+**Sin verificar en vivo**, por orden de riesgo:
+
+- **`⚡` hot reload y `⟳` hot restart**, y por lo tanto también el hot reload al
+  guardar, que usa el mismo `app.restart`. El protocolo está implementado y el
+  daemon acepta la conexión, pero nunca he visto ejecutarse un `app.restart`.
+- **La generación de APK/AAB/IPA** de principio a fin, y con ella `Instalar en…`.
+- **Grabar la pantalla**, DevTools, ADB por WiFi y la vista de barra lateral.
+
+Lo que sí hice con todo lo anterior: cargar la extensión en Node con un stub de la
+API de VS Code (activa y desactiva sin errores) y ejecutar los helpers puros con
+las rutas reales de esta máquina.
+
+### Un bug que salió en el camino
+
+Al escribir estas features encontré que `adbBin()`, `androidEmulatorBin()` y
+`androidSdkDir()` se usaban en todo el módulo pero **nunca estuvieron definidas**:
+están así desde la primera versión publicada. Cualquier acción de emulador Android
+o de reparación tiraba `ReferenceError` en vez de correr. Quedaron implementadas en
+la 0.12.0, resolviendo el SDK desde `ANDROID_HOME`, `ANDROID_SDK_ROOT` y las rutas
+por defecto de macOS, Linux y Windows.
 
 ## Licencia
 
