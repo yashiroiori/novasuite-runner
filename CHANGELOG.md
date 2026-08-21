@@ -2,6 +2,12 @@
 
 Todas las versiones notables de NovaSuite Runner.
 
+## [0.12.1] — 2026-08-21
+
+### Cambiado
+- El README ya no dibuja la interfaz en ASCII: la captura del panel la muestra
+  mejor y el dibujo se habia quedado viejo (no traia el menu de app ni DevTools).
+
 ## [0.12.0] — 2026-08-20
 
 ### Agregado

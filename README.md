@@ -45,23 +45,7 @@ partirla en dos o dejarla al lado del código.
 
 ## La interfaz
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ NovaSuite Runner   3 activos · 6 apps · 2 corriendo   [Refrescar] [⚙] │
-├────────────┬─────────────────────────────────────────────────┤
-│ Apps       │ Dispositivos activos (3) | Favoritos (2) | Inactivos (33) │
-│            │                                                 │
-│ ▣ tienda   │  ── Fisicos ─────────────────────── 1           │
-│ ▣ taller   │  ┌──────────────┐  ┌──────────────┐             │
-│ ▣ agenda   │  │ ★  ⋯         │  │ ★  ⋯         │             │
-│ ▣ …        │  │ Redmi Note 12│  │ iPhone 15 Pro│             │
-│            │  │ ● ACTIVO     │  │ ● ACTIVO     │             │
-│            │  │ ▶ Correr …   │  │ ⚡ ⟳ ■        │             │
-├────────────┴─────────────────────────────────────────────────┤
-│ tienda · iPhone 15 | taller · Redmi              [Limpiar]    │
-│ Syncing files to device…                                     │
-└──────────────────────────────────────────────────────────────┘
-```
+La captura de arriba es el panel completo.
 
 **Barra superior** — resumen vivo (`N activos · N apps · N corriendo`), botón
 **Refrescar** (vuelve a escanear apps y dispositivos) y el engrane **⚙**, que abre
