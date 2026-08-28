@@ -778,15 +778,39 @@ function repairItems(d) {
  */
 function installRuntime(runtime) {
   const version = String(runtime || '').replace(/[^0-9.]/g, '');
-  if (!version) {
-    post({ type: 'error', message: 'No pude deducir la version del runtime.' });
-    return;
-  }
-  const cmd = `xcodebuild -downloadPlatform iOS -buildVersion ${version}`;
-  const term = vscode.window.createTerminal('NovaSuite Runner · runtime iOS');
-  term.show(true);
-  term.sendText(cmd);
-  post({ type: 'toast', message: `Descargando el runtime de iOS ${version} en la terminal.` });
+
+  // -buildVersion existe desde Xcode 16. En Xcode 15 la unica forma por linea de
+  // comandos es bajar el runtime mas nuevo que soporte ese Xcode, sin elegir cual.
+  cp.execFile('xcodebuild', ['-help'], { timeout: 30000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+    if (err && err.code === 'ENOENT') {
+      post({ type: 'error', message: 'No encontre xcodebuild. Instala Xcode para bajar runtimes de iOS.' });
+      return;
+    }
+    const canPickVersion = /-buildVersion/.test(String(stdout || ''));
+    const cmd =
+      canPickVersion && version
+        ? `xcodebuild -downloadPlatform iOS -buildVersion ${version}`
+        : 'xcodebuild -downloadPlatform iOS';
+
+    const term = vscode.window.createTerminal('NovaSuite Runner · runtime iOS');
+    term.show(true);
+    term.sendText(cmd);
+
+    if (canPickVersion || !version) {
+      post({ type: 'toast', message: 'Descargando el runtime de iOS en la terminal.' });
+      return;
+    }
+    vscode.window.showWarningMessage(
+      `Tu Xcode no deja elegir la version del runtime: va a bajar el mas nuevo que soporte, no necesariamente iOS ${version}.`,
+      'Como bajar uno viejo'
+    ).then((pick) => {
+      if (pick) {
+        vscode.window.showInformationMessage(
+          `Para instalar iOS ${version}: Xcode -> Settings -> Platforms -> boton +, y elige el runtime de la lista.`
+        );
+      }
+    });
+  });
 }
 
 function pruneSimulators() {

@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NovaSuite Runner.
 
+## [0.12.3] — 2026-08-28
+
+### Arreglado
+- **Instalar runtime** mandaba `xcodebuild -downloadPlatform iOS -buildVersion X`,
+  que no existe antes de Xcode 16: fallaba con `invalid option '-buildVersion'`.
+  Ahora se comprueba si el flag esta disponible y, si no, se baja el runtime mas
+  nuevo que soporte ese Xcode avisando que puede no ser el que se pidio.
+
 ## [0.12.2] — 2026-08-21
 
 ### Agregado

@@ -205,11 +205,14 @@ el propio `simctl` (`runtime profile not found`) y dos botones:
 
 | Boton | Que hace |
 |---|---|
-| **Instalar runtime** | Abre una terminal con `xcodebuild -downloadPlatform iOS -buildVersion X` |
+| **Instalar runtime** | Abre una terminal con `xcodebuild -downloadPlatform iOS` |
 | **Quitar** | `xcrun simctl delete unavailable`, borra el registro de todos los que no arrancan |
 
 La descarga son varios GB y puede pedir la contrasena, por eso va a una terminal
-visible y no a un proceso escondido. Antes estos simuladores se ocultaban sin
+visible y no a un proceso escondido. Elegir *que* version se baja (`-buildVersion`)
+solo existe desde Xcode 16; con uno anterior se baja el runtime mas nuevo que ese
+Xcode soporte y la extension te avisa, porque puede no ser el que pediste. Para
+instalar uno viejo: **Xcode -> Settings -> Platforms -> +**. Antes estos simuladores se ocultaban sin
 avisar, y desaparecian de la lista sin explicacion.
 
 **En cuanto un dispositivo arranca o se conecta, aparece solo.** No hay sondeo ni
