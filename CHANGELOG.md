@@ -2,6 +2,14 @@
 
 Todas las versiones notables de NovaSuite Runner.
 
+## [0.12.2] — 2026-08-21
+
+### Agregado
+- Los simuladores de iOS cuyo runtime ya no esta instalado dejan de ocultarse:
+  salen en gris como **NO DISPONIBLE**, con el motivo que reporta `simctl` y
+  botones para bajar el runtime (`xcodebuild -downloadPlatform`) o borrar los
+  registros muertos (`simctl delete unavailable`).
+
 ## [0.12.1] — 2026-08-21
 
 ### Cambiado

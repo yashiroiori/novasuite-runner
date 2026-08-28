@@ -197,6 +197,21 @@ Los simuladores de iOS se leen con `xcrun simctl list devices --json`, no con
 Flutter: el daemon reporta un único `apple_ios_simulator` genérico en vez de uno
 por simulador.
 
+### Simuladores sin runtime
+
+Un simulador cuyo runtime de iOS se desinstalo sigue registrado en `simctl` pero
+no puede arrancar. Aparecen en gris, como **NO DISPONIBLE**, con el motivo que da
+el propio `simctl` (`runtime profile not found`) y dos botones:
+
+| Boton | Que hace |
+|---|---|
+| **Instalar runtime** | Abre una terminal con `xcodebuild -downloadPlatform iOS -buildVersion X` |
+| **Quitar** | `xcrun simctl delete unavailable`, borra el registro de todos los que no arrancan |
+
+La descarga son varios GB y puede pedir la contrasena, por eso va a una terminal
+visible y no a un proceso escondido. Antes estos simuladores se ocultaban sin
+avisar, y desaparecian de la lista sin explicacion.
+
 **En cuanto un dispositivo arranca o se conecta, aparece solo.** No hay sondeo ni
 botón que apretar: un `flutter daemon` de larga vida empuja `device.added` y
 `device.removed` en cuanto pasan. Medido: un simulador aparece ~8s después del

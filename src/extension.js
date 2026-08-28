@@ -190,6 +190,12 @@ function handleMessage(msg) {
     case 'launchEmulator':
       launchEmulator(msg.id, msg.cold);
       break;
+    case 'installRuntime':
+      installRuntime(msg.runtime);
+      break;
+    case 'pruneSimulators':
+      pruneSimulators();
+      break;
     case 'toggleFavorite':
       toggleFavorite(msg.id);
       break;
@@ -460,7 +466,7 @@ function loadIosSimulators() {
 
   cp.execFile(
     'xcrun',
-    ['simctl', 'list', 'devices', 'available', '--json'],
+    ['simctl', 'list', 'devices', '--json'],
     { timeout: 30000, maxBuffer: 8 * 1024 * 1024 },
     (err, stdout) => {
       if (err) return;
@@ -477,8 +483,20 @@ function loadIosSimulators() {
         if (!/iOS|xrOS|watchOS|tvOS/.test(runtime)) continue;
         const group = runtimeLabel(runtime);
         for (const d of list) {
-          if (d.isAvailable === false) continue;
-          sims.push({ id: d.udid, name: d.name, platform: 'ios', kind: 'ios', group, state: d.state });
+          // Un simulador cuyo runtime se desinstalo sigue registrado pero no arranca.
+          // Ocultarlo lo hace desaparecer sin explicacion; mejor mostrarlo apagado.
+          const gone = d.isAvailable === false;
+          sims.push({
+            id: d.udid,
+            name: d.name,
+            platform: 'ios',
+            kind: 'ios',
+            group,
+            state: d.state,
+            unavailable: gone,
+            reason: gone ? String(d.availabilityError || 'no disponible') : '',
+            runtime: group,
+          });
         }
       }
 
@@ -751,6 +769,44 @@ function repairItems(d) {
   }
 
   return [];
+}
+
+/**
+ * Un simulador sin runtime instalado no se arregla con simctl: hay que bajar el
+ * runtime. La descarga son varios GB y puede pedir la contrasena, asi que va a una
+ * terminal visible en vez de correr escondida.
+ */
+function installRuntime(runtime) {
+  const version = String(runtime || '').replace(/[^0-9.]/g, '');
+  if (!version) {
+    post({ type: 'error', message: 'No pude deducir la version del runtime.' });
+    return;
+  }
+  const cmd = `xcodebuild -downloadPlatform iOS -buildVersion ${version}`;
+  const term = vscode.window.createTerminal('NovaSuite Runner · runtime iOS');
+  term.show(true);
+  term.sendText(cmd);
+  post({ type: 'toast', message: `Descargando el runtime de iOS ${version} en la terminal.` });
+}
+
+function pruneSimulators() {
+  vscode.window
+    .showWarningMessage(
+      'Borrar los simuladores sin runtime instalado?',
+      { modal: true, detail: 'xcrun simctl delete unavailable\n\nQuita el registro de los simuladores que ya no pueden arrancar. No toca los que si funcionan.' },
+      'Borrar'
+    )
+    .then((ok) => {
+      if (ok !== 'Borrar') return;
+      cp.execFile('xcrun', ['simctl', 'delete', 'unavailable'], { timeout: 120000 }, (err) => {
+        if (err) {
+          post({ type: 'error', message: toolError('xcrun simctl delete unavailable', err) });
+          return;
+        }
+        post({ type: 'toast', message: 'Registros borrados.' });
+        loadIosSimulators();
+      });
+    });
 }
 
 function runSteps(steps, label) {

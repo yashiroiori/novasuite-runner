@@ -487,9 +487,24 @@ function inactiveCard(e) {
   card.appendChild(el('div', 'devsub', e.platform || 'emulador'));
 
   const st = el('div', 'devstate');
-  st.appendChild(el('span', 'dot off'));
-  st.appendChild(el('span', null, 'INACTIVO'));
+  st.appendChild(el('span', e.unavailable ? 'dot gone' : 'dot off'));
+  st.appendChild(el('span', null, e.unavailable ? 'NO DISPONIBLE' : 'INACTIVO'));
   card.appendChild(st);
+
+  // Sin el runtime instalado no hay nada que arrancar: se explica y se ofrece bajarlo.
+  if (e.unavailable) {
+    card.classList.add('gone');
+    card.appendChild(el('div', 'devreason', e.reason || 'El runtime no esta instalado.'));
+    const acts = el('div', 'devactions');
+    acts.appendChild(button('Instalar runtime', 'btn ghost', () =>
+      vscode.postMessage({ type: 'installRuntime', runtime: e.runtime || e.group })));
+    const del = button('Quitar', 'btn ghost', () =>
+      vscode.postMessage({ type: 'pruneSimulators' }));
+    del.title = 'Borra el registro de todos los simuladores sin runtime';
+    acts.appendChild(del);
+    card.appendChild(acts);
+    return card;
+  }
 
   const actions = el('div', 'devactions');
   actions.appendChild(button('Arrancar', 'btn ghost', () =>

@@ -228,6 +228,17 @@ h2 {
 }
 .dot.off { background: var(--vscode-descriptionForeground); opacity: .55; }
 
+.dot.gone { background: var(--vscode-editorWarning-foreground, #cca700); opacity: .8; }
+
+.dev.gone { opacity: .6; }
+
+.devreason {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--vscode-descriptionForeground);
+}
+
 .pill {
   font-size: .7em;
   padding: 1px 7px;
